@@ -300,49 +300,178 @@ function generateTextures(scene) {
   g.destroy();
 }
 
-// ─── BootScene ───────────────────────────────────────────────────────────────
+// ─── BootScene (OoT-Inspired 8-bit Title Screen) ─────────────────────────────
 class BootScene extends Phaser.Scene {
   constructor() { super('Boot'); }
 
   create() {
     generateTextures(this);
+    const W = 480, H = 360;
+    this.started = false;
 
-    // Title screen
-    this.add.rectangle(240, 180, 480, 360, PAL.black);
+    // ── Sky gradient: deep purple (top) → warm amber (horizon) ──
+    const sky = this.add.graphics();
+    const skyBands = [
+      [0,   25, 0x05021a], [25,  25, 0x070320], [50,  25, 0x0d0728],
+      [75,  20, 0x130c38], [95,  20, 0x1e1048], [115, 20, 0x2c1858],
+      [135, 18, 0x401a60], [153, 15, 0x5c2068], [168, 14, 0x7a2858],
+      [182, 14, 0xa03042], [196, 14, 0xcc482e], [210, 14, 0xe06828],
+      [224, 13, 0xef8830], [237, 13, 0xf4a040], [250, 13, 0xf8b855],
+    ];
+    for (const [y, h, c] of skyBands) { sky.fillStyle(c, 1); sky.fillRect(0, y, W, h); }
 
-    // Title text
-    const titleStyle = { fontSize: '20px', fill: '#ffd700', fontFamily: 'Courier New', stroke: '#000', strokeThickness: 4 };
-    this.add.text(240, 80, 'GreenMountainFog', titleStyle).setOrigin(0.5);
-    this.add.text(240, 108, 'The Journey', { ...titleStyle, fontSize: '14px', fill: '#aaffaa' }).setOrigin(0.5);
+    // ── Stars (deterministic positions, upper sky only) ──
+    const starG = this.add.graphics().setDepth(1);
+    starG.fillStyle(0xffffff, 1);
+    const stars = [
+      [22,8,1],[47,22,1],[82,6,2],[112,34,1],[152,10,1],[192,20,1],
+      [234,4,2],[272,16,1],[312,28,1],[357,6,1],[392,18,1],[432,12,2],
+      [462,33,1],[37,48,1],[102,58,1],[202,43,1],[322,53,1],[422,40,1],
+      [52,78,1],[172,73,1],[292,83,1],[422,68,1],[12,98,1],[242,93,1],
+      [382,98,1],[142,108,1],[342,103,1],
+    ];
+    for (const [sx, sy, sz] of stars) starG.fillRect(sx, sy, sz, sz);
+    this.time.addEvent({ delay: 900, loop: true,
+      callback: () => starG.setAlpha(0.75 + Math.random() * 0.25) });
 
-    // Draw mini elf on title
-    const g = this.add.graphics();
-    // simple elf silhouette
-    g.fillStyle(PAL.elfGreen, 1); g.fillRect(224, 150, 32, 28);
-    g.fillStyle(PAL.elfSkin, 1); g.fillRect(228, 138, 24, 18);
-    g.fillStyle(PAL.elfHair, 1); g.fillRect(228, 138, 24, 6);
+    // ── Moon (upper right, glowing) ──
+    const moon = this.add.graphics().setDepth(2);
+    moon.fillStyle(0xffeeaa, 0.10); moon.fillCircle(405, 50, 24);
+    moon.fillStyle(0xffeeaa, 0.18); moon.fillCircle(405, 50, 19);
+    moon.fillStyle(0xfff4c0, 1);    moon.fillCircle(405, 50, 14);
+    moon.fillStyle(0xe8d890, 1);    moon.fillCircle(409, 46,  5);
+    moon.fillStyle(0xd4c470, 0.6);  moon.fillCircle(399, 57,  3);
+    moon.fillStyle(0xd4c470, 0.5);  moon.fillCircle(411, 43,  2);
 
-    this.add.text(240, 220, 'Press ENTER or SPACE to start', {
-      fontSize: '10px', fill: '#ffffff', fontFamily: 'Courier New'
-    }).setOrigin(0.5);
+    // ── Far mountains (dark purple silhouette, slow parallax) ──
+    this.farMtnG = this.add.graphics().setDepth(3);
+    this._drawMountainLayer(this.farMtnG, W, 0x160c40, 0x0e0828, 225, 90);
 
-    this.add.text(240, 300, '[ Use Arrow Keys to move ]', {
-      fontSize: '9px', fill: '#888888', fontFamily: 'Courier New'
-    }).setOrigin(0.5);
+    // ── Near mountains / rolling hills (dark green, faster parallax) ──
+    this.nearMtnG = this.add.graphics().setDepth(4);
+    this._drawMountainLayer(this.nearMtnG, W, 0x0f2a18, 0x071510, 260, 65);
 
-    this.add.text(240, 315, '[ Press SPACE / ENTER to interact ]', {
-      fontSize: '9px', fill: '#888888', fontFamily: 'Courier New'
-    }).setOrigin(0.5);
+    // ── Atmospheric fog strips across the valleys ──
+    const fog = this.add.graphics().setDepth(5);
+    const fogBands = [
+      [215, 18, 0xb0d0f0, 0.07], [228, 20, 0xc0d8f8, 0.06],
+      [244, 18, 0xd0e8ff, 0.07], [258, 16, 0xe8f4ff, 0.09],
+      [270, 14, 0xf0f8ff, 0.12],
+    ];
+    for (const [y, h, c, a] of fogBands) { fog.fillStyle(c, a); fog.fillRect(0, y, W, h); }
+    this.time.addEvent({ delay: 2600, loop: true, callback: () => {
+      this.tweens.add({ targets: fog, alpha: { from: 0.8, to: 1.15 },
+        duration: 1300, yoyo: true, ease: 'Sine.easeInOut' });
+    }});
 
-    // Blink
-    let visible = true;
-    this.time.addEvent({
-      delay: 500, loop: true,
-      callback: () => { visible = !visible; }
+    // ── Ground / meadow (layered greens) ──
+    const gnd = this.add.graphics().setDepth(6);
+    gnd.fillStyle(0x1e4a14, 1); gnd.fillRect(0, 272, W, H - 272);
+    gnd.fillStyle(0x2d6820, 1); gnd.fillRect(0, 280, W, H - 280);
+    gnd.fillStyle(0x3a7a2a, 1); gnd.fillRect(0, 288, W, H - 288);
+    gnd.fillStyle(0x4a9030, 1); gnd.fillRect(0, 295, W, H - 295);
+    // Grass tufts along the hill line
+    gnd.fillStyle(0x5ab038, 1);
+    for (let gx = 0; gx < W; gx += 9) {
+      const gh = 2 + (gx * 7 + 11) % 5;
+      gnd.fillRect(gx,     270 - gh, 2, gh + 4);
+      gnd.fillRect(gx + 4, 272 - gh, 2, gh + 2);
+    }
+
+    // ── Elf walking across the field (OoT-inspired) ──
+    this.elfSprite = this.add.image(-20, 258, 'playerRight').setScale(2).setDepth(7);
+    this.elfWalking = true;
+    let elfFrame = 0;
+    this.walkTimer = this.time.addEvent({ delay: 175, loop: true, callback: () => {
+      if (!this.elfWalking) return;
+      elfFrame = (elfFrame + 1) % 2;
+      this.elfSprite.setTexture(elfFrame === 0 ? 'playerRight' : 'playerDown');
+    }});
+    this.tweens.add({
+      targets: this.elfSprite, x: 158, duration: 3000, ease: 'Linear',
+      onComplete: () => {
+        this.elfWalking = false;
+        this.elfSprite.setTexture('playerDown');
+        this.time.delayedCall(500,  () => this.elfSprite.setTexture('playerLeft'));
+        this.time.delayedCall(1300, () => this.elfSprite.setTexture('playerDown'));
+        this.time.delayedCall(2100, () => this.elfSprite.setTexture('playerRight'));
+        this.time.delayedCall(2700, () => this.elfSprite.setTexture('playerDown'));
+      }
     });
 
-    this.input.keyboard.once('keydown-ENTER', () => this.scene.start('Overworld'));
-    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('Overworld'));
+    // ── Title text (fades in after 1 s) ──
+    this.title1 = this.add.text(240, 46, 'GreenMountainFog', {
+      fontSize: '22px', fill: '#ffd700', fontFamily: 'Courier New',
+      stroke: '#7a4000', strokeThickness: 4,
+    }).setOrigin(0.5).setAlpha(0).setDepth(20);
+    this.title2 = this.add.text(240, 74, '— The Journey —', {
+      fontSize: '13px', fill: '#aaffaa', fontFamily: 'Courier New',
+      stroke: '#004400', strokeThickness: 2,
+    }).setOrigin(0.5).setAlpha(0).setDepth(20);
+    this.tweens.add({ targets: [this.title1, this.title2], alpha: 1,
+      duration: 2000, delay: 900, ease: 'Sine.easeIn' });
+
+    this.add.text(240, 97, 'An 8-bit Adventure', {
+      fontSize: '9px', fill: '#88ccaa', fontFamily: 'Courier New',
+    }).setOrigin(0.5).setAlpha(0).setDepth(20);
+    this.tweens.add({ targets: this.children.list[this.children.list.length - 1],
+      alpha: 0.8, duration: 1500, delay: 2000, ease: 'Sine.easeIn' });
+
+    // ── "Press SPACE / Tap to Start" blinking prompt ──
+    this.startPrompt = this.add.text(240, 330, 'PRESS SPACE  /  TAP TO START', {
+      fontSize: '10px', fill: '#ffffff', fontFamily: 'Courier New',
+    }).setOrigin(0.5).setAlpha(0).setDepth(20);
+    this.time.delayedCall(3200, () => {
+      this.tweens.add({ targets: this.startPrompt, alpha: 1, duration: 600,
+        onComplete: () => {
+          this.time.addEvent({ delay: 550, loop: true,
+            callback: () => this.startPrompt.setVisible(!this.startPrompt.visible) });
+        }
+      });
+    });
+    this.add.text(240, 347, '[ Arrow Keys / D-Pad  |  SPACE / A to interact ]', {
+      fontSize: '7px', fill: '#555555', fontFamily: 'Courier New',
+    }).setOrigin(0.5).setDepth(20);
+
+    // ── Input ──
+    this.input.keyboard.once('keydown-ENTER', () => this.startGame());
+    this.input.keyboard.once('keydown-SPACE', () => this.startGame());
+    this.input.once('pointerdown', () => this.startGame());
+  }
+
+  _drawMountainLayer(g, W, color1, color2, baseY, maxH) {
+    g.fillStyle(color1, 1);
+    g.fillPoints([
+      {x:0,   y:baseY}, {x:45,  y:baseY-maxH*0.42}, {x:92,  y:baseY-maxH},
+      {x:142, y:baseY-maxH*0.60}, {x:178, y:baseY-maxH*0.86},
+      {x:218, y:baseY-maxH*0.48}, {x:268, y:baseY-maxH*0.94},
+      {x:318, y:baseY-maxH*0.66}, {x:362, y:baseY-maxH*0.97},
+      {x:408, y:baseY-maxH*0.53}, {x:448, y:baseY-maxH*0.76},
+      {x:480, y:baseY-maxH*0.46}, {x:480, y:baseY},
+    ], true);
+    g.fillStyle(color2, 1);
+    g.fillPoints([
+      {x:0,   y:baseY}, {x:58,  y:baseY-maxH*0.32}, {x:112, y:baseY-maxH*0.52},
+      {x:164, y:baseY-maxH*0.36}, {x:214, y:baseY-maxH*0.58},
+      {x:264, y:baseY-maxH*0.40}, {x:314, y:baseY-maxH*0.56},
+      {x:364, y:baseY-maxH*0.30}, {x:414, y:baseY-maxH*0.50},
+      {x:464, y:baseY-maxH*0.33}, {x:480, y:baseY-maxH*0.26},
+      {x:480, y:baseY},
+    ], true);
+  }
+
+  startGame() {
+    if (this.started) return;
+    this.started = true;
+    this.cameras.main.fade(800, 0, 0, 0, false, (cam, progress) => {
+      if (progress === 1) this.scene.start('Overworld');
+    });
+  }
+
+  update() {
+    const t = this.time.now / 1000;
+    if (this.farMtnG)  this.farMtnG.x  = Math.sin(t * 0.11) * 4;
+    if (this.nearMtnG) this.nearMtnG.x = Math.sin(t * 0.19) * 8;
   }
 }
 
@@ -441,6 +570,9 @@ class OverworldScene extends Phaser.Scene {
     this.cursors = this.input.keyboard.createCursorKeys();
     this.interactKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.enterKey    = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
+
+    this.scene.launch('Touch');
+    this.touch = this.scene.get('Touch');
 
     this.cameras.main.setBounds(0, 0, 576, 576);
     this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
@@ -761,17 +893,17 @@ class OverworldScene extends Phaser.Scene {
     const speed = this.moveSpeed;
     let vx = 0, vy = 0;
 
+    const td = this.touch ? this.touch.dpad : {};
     if (!this.inDialogue && !this.questComplete) {
-      if (this.cursors.left.isDown)  { vx = -speed; this.facing = 'left';  this.player.setTexture('playerLeft'); }
-      if (this.cursors.right.isDown) { vx =  speed; this.facing = 'right'; this.player.setTexture('playerRight'); }
-      if (this.cursors.up.isDown)    { vy = -speed; this.facing = 'up';    this.player.setTexture('playerUp'); }
-      if (this.cursors.down.isDown)  { vy =  speed; this.facing = 'down';  this.player.setTexture('playerDown'); }
+      if (this.cursors.left.isDown  || td.left)  { vx = -speed; this.facing = 'left';  this.player.setTexture('playerLeft'); }
+      if (this.cursors.right.isDown || td.right) { vx =  speed; this.facing = 'right'; this.player.setTexture('playerRight'); }
+      if (this.cursors.up.isDown    || td.up)    { vy = -speed; this.facing = 'up';    this.player.setTexture('playerUp'); }
+      if (this.cursors.down.isDown  || td.down)  { vy =  speed; this.facing = 'down';  this.player.setTexture('playerDown'); }
     } else if (this.questComplete) {
-      // Still allow movement
-      if (this.cursors.left.isDown)  { vx = -speed; this.facing = 'left';  this.player.setTexture('playerLeft'); }
-      if (this.cursors.right.isDown) { vx =  speed; this.facing = 'right'; this.player.setTexture('playerRight'); }
-      if (this.cursors.up.isDown)    { vy = -speed; this.facing = 'up';    this.player.setTexture('playerUp'); }
-      if (this.cursors.down.isDown)  { vy =  speed; this.facing = 'down';  this.player.setTexture('playerDown'); }
+      if (this.cursors.left.isDown  || td.left)  { vx = -speed; this.facing = 'left';  this.player.setTexture('playerLeft'); }
+      if (this.cursors.right.isDown || td.right) { vx =  speed; this.facing = 'right'; this.player.setTexture('playerRight'); }
+      if (this.cursors.up.isDown    || td.up)    { vy = -speed; this.facing = 'up';    this.player.setTexture('playerUp'); }
+      if (this.cursors.down.isDown  || td.down)  { vy =  speed; this.facing = 'down';  this.player.setTexture('playerDown'); }
     }
 
     this.player.setVelocity(vx, vy);
@@ -781,7 +913,8 @@ class OverworldScene extends Phaser.Scene {
 
     // Interact
     const interactPressed = Phaser.Input.Keyboard.JustDown(this.interactKey) ||
-                            Phaser.Input.Keyboard.JustDown(this.enterKey);
+                            Phaser.Input.Keyboard.JustDown(this.enterKey) ||
+                            (this.touch && this.touch.actionJustPressed);
 
     if (interactPressed) {
       if (this.inDialogue) {
@@ -1005,6 +1138,107 @@ class CombatScene extends Phaser.Scene {
   }
 }
 
+// ─── TouchScene (virtual D-pad + action button for mobile) ───────────────────
+class TouchScene extends Phaser.Scene {
+  constructor() {
+    super({ key: 'Touch', active: false });
+    this.dpad = { left: false, right: false, up: false, down: false };
+    this.actionJustPressed = false;
+    this._prevActionDown = false;
+  }
+
+  create() {
+    const W = 480, H = 360;
+    this.padCX = 52;
+    this.padCY = H - 50;
+    this.actCX = W - 52;
+    this.actCY = H - 50;
+
+    this.input.addPointer(1); // enable 2-finger multi-touch
+
+    // ── D-pad background & cross ──
+    const dg = this.add.graphics().setScrollFactor(0).setDepth(50);
+    dg.fillStyle(0x000000, 0.35); dg.fillCircle(this.padCX, this.padCY, 44);
+    dg.lineStyle(1, 0xffffff, 0.20); dg.strokeCircle(this.padCX, this.padCY, 44);
+    dg.fillStyle(0xffffff, 0.15);
+    dg.fillRect(this.padCX - 44, this.padCY - 13, 88, 26);
+    dg.fillRect(this.padCX - 13, this.padCY - 44, 26, 88);
+    // Arrow triangles
+    const cx = this.padCX, cy = this.padCY;
+    dg.fillStyle(0xffffff, 0.55);
+    dg.fillTriangle(cx, cy-30, cx-9, cy-19, cx+9, cy-19); // up
+    dg.fillTriangle(cx, cy+30, cx-9, cy+19, cx+9, cy+19); // down
+    dg.fillTriangle(cx-30, cy, cx-19, cy-9, cx-19, cy+9); // left
+    dg.fillTriangle(cx+30, cy, cx+19, cy-9, cx+19, cy+9); // right
+    dg.fillStyle(0xffffff, 0.18); dg.fillCircle(cx, cy, 11);
+
+    // ── Action button (A) ──
+    const ag = this.add.graphics().setScrollFactor(0).setDepth(50);
+    ag.fillStyle(0x00aa44, 0.45); ag.fillCircle(this.actCX, this.actCY, 28);
+    ag.lineStyle(2, 0x00ff66, 0.35); ag.strokeCircle(this.actCX, this.actCY, 28);
+    this.add.text(this.actCX, this.actCY, 'A', {
+      fontSize: '18px', fill: '#ffffff', fontFamily: 'Courier New',
+      stroke: '#003322', strokeThickness: 2,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(51);
+
+    // Highlight overlays (updated each frame based on active touches)
+    this.dpadHL   = this.add.graphics().setScrollFactor(0).setDepth(52);
+    this.actionHL = this.add.graphics().setScrollFactor(0).setDepth(52);
+
+    // On non-touch desktop show controls at very low opacity as a hint
+    const isTouch = this.sys.game.device.input.touch;
+    if (!isTouch) {
+      dg.setAlpha(0.18);
+      ag.setAlpha(0.18);
+      this.children.list
+        .filter(c => c !== dg && c !== ag && c !== this.dpadHL && c !== this.actionHL)
+        .forEach(c => { if (c.setAlpha) c.setAlpha(0.18); });
+    }
+  }
+
+  update() {
+    const pointers = this.input.manager.pointers;
+    let dl = false, dr = false, du = false, dd = false, act = false;
+
+    for (const p of pointers) {
+      if (!p.active || !p.isDown) continue;
+      const px = p.x, py = p.y;
+
+      // D-pad zone (within 50px of center)
+      const dpx = px - this.padCX, dpy = py - this.padCY;
+      const pdist = Math.sqrt(dpx * dpx + dpy * dpy);
+      if (pdist < 50 && pdist > 6) {
+        if (Math.abs(dpx) > Math.abs(dpy)) {
+          if (dpx < 0) dl = true; else dr = true;
+        } else {
+          if (dpy < 0) du = true; else dd = true;
+        }
+      }
+
+      // Action button zone (within 36px of center)
+      const ax = px - this.actCX, ay = py - this.actCY;
+      if (Math.sqrt(ax * ax + ay * ay) < 36) act = true;
+    }
+
+    this.dpad.left  = dl; this.dpad.right = dr;
+    this.dpad.up    = du; this.dpad.down  = dd;
+    this.actionJustPressed = act && !this._prevActionDown;
+    this._prevActionDown = act;
+
+    // Visual feedback highlights
+    this.dpadHL.clear();
+    this.actionHL.clear();
+    if (dl || dr || du || dd) {
+      this.dpadHL.fillStyle(0xffffff, 0.10);
+      this.dpadHL.fillCircle(this.padCX, this.padCY, 44);
+    }
+    if (act) {
+      this.actionHL.fillStyle(0x00ff88, 0.22);
+      this.actionHL.fillCircle(this.actCX, this.actCY, 28);
+    }
+  }
+}
+
 // ─── Game Config ─────────────────────────────────────────────────────────────
 const config = {
   type: Phaser.AUTO,
@@ -1013,11 +1247,15 @@ const config = {
   parent: 'game-container',
   backgroundColor: '#0a0a0a',
   pixelArt: true,
+  scale: {
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+  },
   physics: {
     default: 'arcade',
     arcade: { debug: false }
   },
-  scene: [BootScene, OverworldScene, UIScene, CombatScene],
+  scene: [BootScene, OverworldScene, UIScene, CombatScene, TouchScene],
 };
 
 const game = new Phaser.Game(config);
